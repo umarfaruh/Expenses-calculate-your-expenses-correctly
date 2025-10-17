@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+
+  <title>Таблица бюджета</title>
+  <style>
+    :root{--bg:#f6f8fb;--card:#ffffff;--accent:#0b74da;--muted:#6b7280}
+    body{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:var(--bg); margin:0; padding:24px}
+    .container{max-width:980px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{font-size:20px;margin:0}
+    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 20px rgba(11,20,40,0.06)}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px 8px;text-align:left;border-bottom:1px solid #eef2f7}
+    th{font-size:13px;color:var(--muted);font-weight:600}
+    td input[type="number"], td input[type="text"], select{width:100%;border:1px solid #e6eef8;padding:8px;border-radius:6px}
+    .actions{display:flex;gap:8px}
+    button{background:var(--accent);border:0;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.ghost{background:transparent;color:var(--accent);border:1px solid #dbe8fb}
+    .muted{color:var(--muted);font-size:13px}
+    .totals{display:flex;gap:12px;align-items:center;margin-top:12px}
+    .pill{background:#f3f7ff;padding:8px 12px;border-radius:999px;font-weight:600}
+    .percent{font-size:13px;color:var(--muted)}
+    .controls{display:flex;gap:8px;align-items:center}
+    @media (max-width:600px){th:nth-child(3),td:nth-child(3),th:nth-child(4),td:nth-child(4){display:none}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Рассходы, правильно рассчитывай свои траты</h1>
+      <div class="controls">
+        <button id="addRow">Добавить строку</button>
+        <button id="save" class="ghost">Сохранить</button>
+        <button id="clear" class="ghost">Очистить</button>
+        <button id="export" class="ghost">Экспорт CSV</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <label class="muted">Ежемесячный доход (₸)</label>
+      <input id="income" type="number" value="напиши" style="max-width:220px;margin-top:6px" />
+
+      <table id="budgetTable" aria-label="Таблица бюджета">
+        <thead>
+          <tr>
+            <th style="width:36%">Категория</th>
+            <th style="width:20%">Тип</th>
+            <th style="width:18%">Сумма (₸)</th>
+            <th style="width:16%">Процент</th>
+            <th style="width:10%">Действие</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- rows inserted by JS -->
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div class="pill">Всего: <span id="total">0</span> ₸</div>
+        <div class="pill">Остаток: <span id="left">0</span> ₸</div>
+        <div class="percent">Рекомендация 50/30/20 — Необходимые/Желания/Накопления</div>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button id="applySample" class="ghost">Добавить примеры</button>
+        <button id="calcPercent" class="ghost">Обновить проценты</button>
+        <button id="print" class="ghost">Распечатать</button>
+      </div>
+
+      <p class="muted" style="margin-top:12px">Подсказка: заполни категории, укажи тип (Необходимое / Желание / Накопления) — система посчитает итог и процент от дохода. Данные сохраняются в браузере.</p>
+    </section>
+  </div>
+
+  <script>
+    const tbody = document.querySelector('#budgetTable tbody');
+    const incomeInput = document.getElementById('income');
+    const totalEl = document.getElementById('total');
+    const leftEl = document.getElementById('left');
+
+    function createRow(item={category:'',type:'Необходимые',amount:0}){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input class="cat" type="text" value="${item.category}" placeholder="Например: Аренда" /></td>
+        <td>
+          <select class="type">
+            <option${item.type==='Употребление'? ' selected':''}>Необходимые</option>
+            <option${item.type==='Цель'? ' selected':''}>Желания</option>
+            <option${item.type==='Накопления'? ' selected':''}>Накопления</option>
+          </select>
+        </td>
+        <td><input class="amt" type="number" value="${item.amount || 0}" min="0" /></td>
+        <td class="pct">0%</td>
+        <td><button class="del ghost">Удалить</button></td>
+      `;
+
+      tr.querySelector('.del').addEventListener('click', ()=>{tr.remove(); recalc();});
+      tr.querySelectorAll('input, select').forEach(el=>el.addEventListener('input', recalc));
+      tbody.appendChild(tr);
+      return tr;
+    }
+
+    function recalc(){
+      const income = Number(incomeInput.value) || 0;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      let sum = 0;
+      rows.forEach(r=>{ const a = Number(r.querySelector('.amt').value)||0; sum+=a});
+      totalEl.textContent = sum.toLocaleString('ru-RU');
+      leftEl.textContent = (income - sum).toLocaleString('ru-RU');
+
+      rows.forEach(r=>{
+        const a = Number(r.querySelector('.amt').value)||0;
+        const pct = income>0? Math.round((a/income)*1000)/10 : 0; // one decimal
+        r.querySelector('.pct').textContent = pct + '%';
+      });
+
+      saveToLocal();
+    }
+
+    function saveToLocal(){
+      const income = Number(incomeInput.value)||0;
+      const rows = Array.from(tbody.querySelectorAll('tr')).map(r=>({
+        category:r.querySelector('.cat').value,
+        type:r.querySelector('.type').value,
+        amount:Number(r.querySelector('.amt').value)||0
+      }));
+      localStorage.setItem('budget_v1', JSON.stringify({income,rows}));
+    }
+
+    function loadFromLocal(){
+      const raw = localStorage.getItem('budget_v1');
+      if(!raw) return false;
+      try{
+        const data = JSON.parse(raw);
+        incomeInput.value = data.income || 0;
+        tbody.innerHTML = '';
+        (data.rows||[]).forEach(r=>createRow(r));
+        recalc();
+        return true;
+      }catch(e){console.warn(e);}
+      return false;
+    }
+
+    document.getElementById('addRow').addEventListener('click', ()=>{createRow(); recalc();});
+    document.getElementById('save').addEventListener('click', ()=>{saveToLocal(); alert('Сохранено в браузере.');});
+    document.getElementById('clear').addEventListener('click', ()=>{ if(confirm('Очистить все строки?')){tbody.innerHTML=''; recalc(); localStorage.removeItem('budget_v1');}});
+    document.getElementById('applySample').addEventListener('click', ()=>{
+      const sample = [
+        {category:'Аренда',type:'Необходимые',amount:30000},
+        {category:'Продукты',type:'Необходимые',amount:20000},
+        {category:'Транспорт',type:'Необходимые',amount:4000},
+        {category:'Кафе и развлечения',type:'Желания',amount:5000},
+        {category:'Накопления',type:'Накопления',amount:10000}
+      ];
+      tbody.innerHTML=''; sample.forEach(s=>createRow(s)); recalc();
+    });
+
+    document.getElementById('calcPercent').addEventListener('click', recalc);
+    document.getElementById('export').addEventListener('click', ()=>{
+      const income = Number(incomeInput.value)||0;
+      const rows = Array.from(tbody.querySelectorAll('tr')).map(r=>({
+        category:r.querySelector('.cat').value,
+        type:r.querySelector('.type').value,
+        amount:Number(r.querySelector('.amt').value)||0,
+        percent: r.querySelector('.pct').textContent
+      }));
+      let csv = 'Категория,Тип,Сумма,Процент\n';
+      rows.forEach(r=>{csv += `"${r.category}","${r.type}",${r.amount},${r.percent}\n`;});
+      csv += `\nДоход:,${income}\nВсего:,${Number(totalEl.textContent.replace(/\s/g,''))}\nОстаток: ,${Number(leftEl.textContent.replace(/\s/g,''))}`;
+      const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'budget.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('print').addEventListener('click', ()=>{window.print();});
+
+    incomeInput.addEventListener('input', recalc);
+
+    // initial
+    if(!loadFromLocal()){
+      // default rows
+      createRow({category: value="Аренда", type:'Необходимые',amount:30000});
+      createRow({category:'Продукты',type:'Необходимые',amount:20000});
+      createRow({category:'Транспорт',type:'Необходимые',amount:4000});
+      createRow({category:'Развлечения',type:'Желания',amount:5000});
+      createRow({category:'Накопления',type:'Накопления',amount:10000});
+      recalc();
+    }
+  </script>
+
+
+<a href="http://127.0.0.1:5500/index.html" class="btn1"> доходы и расходы</a>
+      <style>
+      .btn1 {
+
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #007bff;
+        color: white;
+        font-weight: 500;
+        text-decoration: none;
+        border-radius: 8px;
+        transition: background-color 0.3s ease, transform 0.2s ease;
+        margin-left: 255px;
+      }
+ .btn1:hover {
+        background-color: #0056b3;
+        transform: translateY(-2px);
+  }
+  
+  .btn1:active {
+    transform: translateY(0);
+  }
+  </style>
+
+
+
+  <a href="http://127.0.0.1:5501/index.html" class="btn">Налоговый калькулятор</a>
+      <style>
+      .btn {
+
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #007bff;
+        color: white;
+        font-weight: 500;
+        text-decoration: none;
+        border-radius: 8px;
+        transition: background-color 0.3s ease, transform 0.2s ease;
+       margin-left: 100px;
+      }
+ .btn1:hover {
+        background-color: #0056b3;
+        transform: translateY(-2px);
+  }
+  
+  .btn1:active {
+    transform: translateY(0);
+  }
+  </style>
+
+<a href="http://127.0.0.1:5502/index.html" class="btn">Накопи на свою мечту</a>
+      <style>
+      .btn {
+
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #007bff;
+        color: white;
+        font-weight: 500;
+        text-decoration: none;
+        border-radius: 8px;
+        transition: background-color 0.3s ease, transform 0.2s ease;
+       margin-left: 110px;
+      }
+ .btn1:hover {
+        background-color: #0056b3;
+        transform: translateY(-2px);
+  }
+  
+  .btn1:active {
+    transform: translateY(0);
+  }
+  </style>
+</body>
+</html>
